@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BLUFF MASTER</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: Arial, sans-serif; background: linear-gradient(135deg,#1a1a2e,#16213e); color:#fff; min-height:100vh; padding:10px; }
+  .header { text-align:center; margin-bottom:16px; background:linear-gradient(135deg,#ffd700,#ffed4e); padding:14px; border-radius:10px; }
+  .header h1 { color:#1a1a2e; font-size:24px; }
+  .status { text-align:center; padding:12px; background:rgba(124,252,0,0.1); border:2px solid #7cfc00; border-radius:8px; margin-bottom:14px; font-size:14px; }
+  .status.waiting { background:rgba(255,215,0,0.1); border-color:#ffd700; }
+  .timer { font-size:20px; font-weight:bold; color:#ff6b6b; text-align:center; margin-bottom:14px; }
+  .players-list { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; margin-bottom:14px; }
+  .player-badge { background:linear-gradient(135deg,#16213e,#0f3460); border:2px solid #ffd700; padding:8px; border-radius:6px; text-align:center; font-size:12px; }
+  .player-badge.current { background:linear-gradient(135deg,#ffd700,#ffed4e); color:#1a1a2e; font-weight:bold; }
+  .table { background:rgba(34,139,34,0.15); border:3px solid #228b22; padding:16px; border-radius:12px; margin-bottom:14px; min-height:110px; display:flex; flex-wrap:wrap; gap:8px; justify-content:center; align-items:center; }
+  .card { width:54px; height:80px; background:#fff; border:2px solid #333; border-radius:6px; display:flex; align-items:center; justify-content:center; font-size:17px; font-weight:bold; color:#000; box-shadow:0 3px 6px rgba(0,0,0,0.3); }
+  .hand { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+  .hand .card { cursor:pointer; transition:0.15s; }
+  .hand .card:hover { transform:translateY(-4px); }
+  .hand .card.selected { border-color:#ffd700; box-shadow:0 0 10px #ffd700; }
+  button { width:100%; padding:12px; background:linear-gradient(135deg,#ffd700,#ffed4e); border:none; border-radius:8px; color:#1a1a2e; font-weight:bold; font-size:14px; margin-bottom:8px; }
+  button:disabled { opacity:0.4; }
+  .winners { background:rgba(124,252,0,0.1); border:2px solid #7cfc00; padding:12px; border-radius:8px; margin-bottom:14px; }
+</style>
+</head>
+<body>
+  <div class="header"><h1>🎴 BLUFF MASTER</h1></div>
+  <div class="status waiting" id="status">Loading...</div>
+  <div class="timer" id="timer"></div>
+  <div class="players-list" id="players"></div>
+  <div class="table" id="table"></div>
+  <div class="winners" id="winners" style="display:none;"></div>
+  <div class="hand" id="hand"></div>
+  <button id="playBtn" onclick="playCard()" disabled>PLAY SELECTED CARD</button>
+
+<script>
+const params = new URLSearchParams(location.search);
+const gameId = params.get('game_id');
+const playerId = parseInt(params.get('player_id'));
+const backend = params.get('backend');
+
+let state = null;
+let selected = null;
+
+async function poll() {
+  try {
+    const res = await fetch(`${backend}/api/state?game_id=${encodeURIComponent(gameId)}&player_id=${playerId}`);
+    if (res.ok) {
+      state = await res.json();
+      render();
+    }
+  } catch (e) { console.error(e); }
+}
+
+function render() {
+  if (!state) return;
+  const statusEl = document.getElementById('status');
+  if (state.status === 'waiting') {
+    statusEl.className = 'status waiting';
+    statusEl.textContent = 'Waiting for host to start...';
+  } else if (state.status === 'playing') {
+    statusEl.className = 'status';
+    const cur = state.players[state.current_turn];
+    statusEl.textContent = `Turn: ${cur ? cur.name : '...'}`;
+  } else if (state.status === 'finished') {
+    statusEl.className = 'status';
+    statusEl.textContent = '🏆 Game finished!';
+  } else if (state.status === 'cancelled') {
+    statusEl.className = 'status';
+    statusEl.textContent = '🛑 Game ended';
+  }
+
+  document.getElementById('timer').textContent =
+    (state.status === 'playing' && state.turn_seconds_left !== null) ? `⏱ ${state.turn_seconds_left}s` : '';
+
+  const playersEl = document.getElementById('players');
+  playersEl.innerHTML = '';
+  Object.entries(state.players).forEach(([pid, p]) => {
+    const b = document.createElement('div');
+    b.className = 'player-badge' + (pid == state.current_turn ? ' current' : '');
+    b.innerHTML = `<strong>${p.name}</strong><br><small>${p.card_count} cards</small>`;
+    playersEl.appendChild(b);
+  });
+
+  const tableEl = document.getElementById('table');
+  tableEl.innerHTML = '';
+  state.table_cards.slice(-8).forEach(c => {
+    const d = document.createElement('div');
+    d.className = 'card';
+    d.textContent = c;
+    tableEl.appendChild(d);
+  });
+
+  const winEl = document.getElementById('winners');
+  if (state.winners && state.winners.length) {
+    winEl.style.display = 'block';
+    winEl.innerHTML = '<strong>🏆 Winners:</strong><br>' +
+      state.winners.map((w,i) => `${i+1}. ${w}`).join('<br>');
+  } else {
+    winEl.style.display = 'none';
+  }
+
+  const handEl = document.getElementById('hand');
+  handEl.innerHTML = '';
+  (state.my_hand || []).forEach(c => {
+    const d = document.createElement('div');
+    d.className = 'card' + (selected === c ? ' selected' : '');
+    d.textContent = c;
+    d.onclick = () => { selected = c; render(); };
+    handEl.appendChild(d);
+  });
+
+  const myTurn = state.current_turn === playerId && state.status === 'playing';
+  document.getElementById('playBtn').disabled = !myTurn || !selected;
+}
+
+async function playCard() {
+  if (!selected) return;
+  try {
+    const res = await fetch(`${backend}/api/play`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({game_id: gameId, player_id: playerId, card: selected})
+    });
+    const result = await res.json();
+    if (!result.success) alert(result.message);
+    selected = null;
+    poll();
+  } catch (e) { console.error(e); }
+}
+
+poll();
+setInterval(poll, 1000);
+</script>
+</body>
+</html>
